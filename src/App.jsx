@@ -1,17 +1,15 @@
 import { useState } from 'react'
 import './App.css'
 
-const INGEST_ENDPOINT = 'https://iwc.app.n8n.cloud/webhook/api/remix/ingest'
-const FRAMES_ENDPOINT = 'https://iwc.app.n8n.cloud/webhook/api/remix/frames'
-const TRANSCRIBE_ENDPOINT = 'https://iwc.app.n8n.cloud/webhook/api/remix/transcribe'
+const TIKTOK_INGEST_ENDPOINT = 'https://iwc.app.n8n.cloud/webhook/api/remix/tiktok-ingest-v1'
 
 function App() {
   const [tiktokURL, setTiktokURL] = useState('')
-  const [jobId, setJobId] = useState(null)
+  const [videoData, setVideoData] = useState(null)
   const [frames, setFrames] = useState([])
   const [transcript, setTranscript] = useState(null)
+  const [tones, setTones] = useState(null)
   const [loading, setLoading] = useState(false)
-  const [transcriptLoading, setTranscriptLoading] = useState(false)
   const [error, setError] = useState(null)
 
   const handleProcess = async () => {
@@ -21,15 +19,14 @@ function App() {
     }
 
     setLoading(true)
-    setTranscriptLoading(false)
     setError(null)
-    setJobId(null)
+    setVideoData(null)
     setFrames([])
     setTranscript(null)
+    setTones(null)
 
     try {
-      // Step 1: Call ingest endpoint
-      const ingestResponse = await fetch(INGEST_ENDPOINT, {
+      const response = await fetch(TIKTOK_INGEST_ENDPOINT, {
         method: 'POST',
         headers: {
           'Content-Type': 'application/json',
@@ -39,67 +36,21 @@ function App() {
         }),
       })
 
-      if (!ingestResponse.ok) {
-        throw new Error(`Ingest failed: ${ingestResponse.statusText}`)
+      if (!response.ok) {
+        throw new Error(`Request failed: ${response.statusText}`)
       }
 
-      const ingestData = await ingestResponse.json()
-      const receivedJobId = ingestData.job_id || ingestData.jobId || ingestData.id
-      
-      if (!receivedJobId) {
-        throw new Error('No job_id received from ingest endpoint')
+      const data = await response.json()
+
+      if (data.status !== 'success') {
+        throw new Error(data.message || 'Processing failed')
       }
 
-      setJobId(receivedJobId)
-
-      // Step 2: Call frames endpoint
-      try {
-        const framesResponse = await fetch(FRAMES_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            job_id: receivedJobId,
-          }),
-        })
-
-        if (framesResponse.ok) {
-          const framesData = await framesResponse.json()
-          // Handle different possible response formats
-          const frameUrls = framesData.frames || framesData.frame_urls || framesData.thumbnails || []
-          setFrames(Array.isArray(frameUrls) ? frameUrls : [])
-        }
-      } catch (framesError) {
-        console.error('Error fetching frames:', framesError)
-        // Don't throw, just log - frames might not be ready yet
-      }
-
-      // Step 3: Call transcribe endpoint
-      setTranscriptLoading(true)
-      try {
-        const transcribeResponse = await fetch(TRANSCRIBE_ENDPOINT, {
-          method: 'POST',
-          headers: {
-            'Content-Type': 'application/json',
-          },
-          body: JSON.stringify({
-            job_id: receivedJobId,
-          }),
-        })
-
-        if (transcribeResponse.ok) {
-          const transcribeData = await transcribeResponse.json()
-          console.log(transcribeData, '===transcribeData')
-          // Handle different possible response formats
-          setTranscript(transcribeData || null)
-        }
-      } catch (transcribeError) {
-        console.error('Error fetching transcript:', transcribeError)
-        // Don't throw, just log - transcript might not be ready yet
-      } finally {
-        setTranscriptLoading(false)
-      }
+      // Set all the data from the response
+      setVideoData(data.video || null)
+      setFrames(Array.isArray(data.frames) ? data.frames : [])
+      setTranscript(data.transcript || null)
+      setTones(data.tones || null)
     } catch (err) {
       setError(err.message || 'An error occurred while processing')
       console.error('Error:', err)
@@ -137,10 +88,28 @@ function App() {
           </div>
         )}
 
-        {jobId && (
-          <div className="job-id-section">
-            <h2>Job ID</h2>
-            <div className="job-id">{jobId}</div>
+        {videoData && (
+          <div className="video-info-section">
+            <h2>Video Information</h2>
+            <div className="video-info">
+              <div className="info-item">
+                <strong>Video ID:</strong> {videoData.video_id}
+              </div>
+              <div className="info-item">
+                <strong>User:</strong> {videoData.user_name}
+              </div>
+              <div className="info-item">
+                <strong>Duration:</strong> {videoData.video_duration} seconds
+              </div>
+              {videoData.video_url && (
+                <div className="info-item">
+                  <strong>Video URL:</strong>{' '}
+                  <a href={videoData.video_url} target="_blank" rel="noopener noreferrer">
+                    {videoData.video_url}
+                  </a>
+                </div>
+              )}
+            </div>
           </div>
         )}
 
@@ -168,27 +137,27 @@ function App() {
           </div>
         )}
 
-        {(transcriptLoading || transcript) && (
+        {tones && (
+          <div className="tones-section">
+            <h2>Tone Variations</h2>
+            <ul className="tones-list">
+              {Object.entries(tones)
+                .filter(([key, value]) => value !== null && value !== undefined && value !== '')
+                .map(([key, value]) => (
+                  <li key={key} className="tone-item">
+                    <div className="tone-label">{key.replace('_', ' ').replace(/\b\w/g, l => l.toUpperCase())}</div>
+                    <div className="tone-content">{value}</div>
+                  </li>
+                ))}
+            </ul>
+          </div>
+        )}
+
+        {transcript && (
           <div className="transcript-section">
             <h2>Transcript</h2>
             <div className="transcript-box">
-              {transcriptLoading ? (
-                <div className="loading-container">
-                  <div className="spinner"></div>
-                  <p className="loading-text">Loading transcript...</p>
-                </div>
-              ) : transcript ? (
-                <ul className="transcript-list">
-                  {Object.entries(transcript)
-                    .filter(([key, value]) => value !== null && value !== undefined && value !== '')
-                    .map(([key, value]) => (
-                      <li key={key} className="transcript-item">
-                        <div className="transcript-label">{key}</div>
-                        <div className="transcript-content">{value}</div>
-                      </li>
-                    ))}
-                </ul>
-              ) : null}
+              <p className="transcript-text">{transcript}</p>
             </div>
           </div>
         )}
